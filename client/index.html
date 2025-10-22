@@ -3,6 +3,7 @@ CHANGELOG
 - Introduced modular single-page app architecture with dedicated CSV, PDF preview, layout, render, QR, and UI modules.
 - Implemented fit-to-box text rendering, wrapping logic, zoom/pan with snapping grid, and advanced keyboard controls.
 - Added CSV validation UI, batching with diagnostics, enhanced QR handling, raster fallback for Indic scripts, and config persistence utilities.
+- Fixed deployment issues caused by stray control characters and improved diagnostics masking logic.
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -1490,7 +1491,12 @@ const diagnostics = (() => {
   const liveRegion = document.getElementById('live-region');
   const MAX_LOGS = 20;
   let entries = [];
-  const mask = (message) => String(message).replace(/(\d{4})(\d{4})(\d{4})/g, (match) => `${match[:-4].replace(/\d/g, '*')}${match.slice(-4)}`);
+  const mask = (message) =>
+    String(message).replace(/\b(\d{5,})\b/g, (digits) => {
+      const visible = digits.slice(-4);
+      const hidden = '*'.repeat(digits.length - 4);
+      return `${hidden}${visible}`;
+    });
   const render = () => {
     if (!logContainer) return;
     logContainer.innerHTML = entries.map((entry) => `<span>[${entry.time}] ${entry.type}: ${entry.msg}</span>`).join('');
@@ -1557,7 +1563,7 @@ const configStore = (() => {
   const cloneFields = () => JSON.parse(JSON.stringify(baseFields));
   const baseConfig = Object.fromEntries(Object.keys(templatePaths).map((key) => [
     key,
-    { id: key, name: key.replace(/_/g, ' ').replace(/\w/g, (c) => c.toUpperCase()), path: templatePaths[key], qr: { x: 470, y: 80, sizePt: 80 }, fields: cloneFields() },
+    { id: key, name: key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()), path: templatePaths[key], qr: { x: 470, y: 80, sizePt: 80 }, fields: cloneFields() },
   ]));
   const storagePrefix = 'cert-layout-config:';
   const load = (templateId, persist) => {
