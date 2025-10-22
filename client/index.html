@@ -1,17 +1,2510 @@
+<!--
+CHANGELOG
+- Introduced modular single-page app architecture with dedicated CSV, PDF preview, layout, render, QR, and UI modules.
+- Implemented fit-to-box text rendering, wrapping logic, zoom/pan with snapping grid, and advanced keyboard controls.
+- Added CSV validation UI, batching with diagnostics, enhanced QR handling, raster fallback for Indic scripts, and config persistence utilities.
+- Fixed deployment issues caused by stray control characters and improved diagnostics masking logic.
+-->
 <!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1"
+    />
     <title>Government Certificate Generator</title>
-    <meta name="description" content="Professional certificate generator for government birth certificates with CSV data import, QR codes, and precise field positioning." />
+    <meta
+      name="description"
+      content="Professional certificate generator for government birth certificates with CSV data import, QR codes, and precise field positioning."
+    />
     <link rel="icon" type="image/png" href="/favicon.png" />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        color-scheme: dark light;
+        --surface: #0f172a;
+        --surface-alt: #1e293b;
+        --surface-raised: #111827;
+        --surface-border: rgba(148, 163, 184, 0.35);
+        --text-primary: #e2e8f0;
+        --text-secondary: #94a3b8;
+        --accent: #38bdf8;
+        --accent-strong: #0284c7;
+        --danger: #f87171;
+        --success: #34d399;
+        --focus: rgba(56, 189, 248, 0.45);
+        --grid-minor: rgba(148, 163, 184, 0.2);
+        --grid-major: rgba(56, 189, 248, 0.35);
+        font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: linear-gradient(145deg, var(--surface), #020617);
+        color: var(--text-primary);
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+
+      body.theme-light {
+        --surface: #f1f5f9;
+        --surface-alt: #e2e8f0;
+        --surface-raised: #ffffff;
+        --surface-border: rgba(15, 23, 42, 0.15);
+        --text-primary: #0f172a;
+        --text-secondary: #475569;
+        --accent: #0284c7;
+        --accent-strong: #0369a1;
+        --danger: #ef4444;
+        --success: #059669;
+        --focus: rgba(14, 165, 233, 0.3);
+        --grid-minor: rgba(30, 64, 175, 0.15);
+        --grid-major: rgba(14, 165, 233, 0.25);
+      }
+
+      body.theme-light main {
+        color: var(--text-primary);
+      }
+
+      h1,
+      h2,
+      h3,
+      h4,
+      h5 {
+        font-weight: 600;
+        margin: 0;
+      }
+
+      p {
+        margin: 0;
+        color: var(--text-secondary);
+      }
+
+      button,
+      select,
+      input,
+      textarea {
+        font: inherit;
+        color: inherit;
+      }
+
+      button {
+        border-radius: 0.75rem;
+        border: 1px solid transparent;
+        background: var(--accent);
+        color: white;
+        padding: 0.5rem 1rem;
+        font-weight: 600;
+        transition: transform 0.12s ease, box-shadow 0.12s ease,
+          background 0.12s ease;
+        cursor: pointer;
+      }
+
+      button:hover {
+        background: var(--accent-strong);
+        box-shadow: 0 8px 24px rgba(2, 132, 199, 0.35);
+        transform: translateY(-1px);
+      }
+
+      button:focus-visible,
+      input:focus-visible,
+      select:focus-visible,
+      textarea:focus-visible {
+        outline: 3px solid var(--focus);
+        outline-offset: 2px;
+      }
+
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+        box-shadow: none;
+        transform: none;
+      }
+
+      header {
+        padding: 1.25rem 2rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: rgba(15, 23, 42, 0.75);
+        backdrop-filter: blur(16px);
+        border-bottom: 1px solid var(--surface-border);
+        position: sticky;
+        top: 0;
+        z-index: 20;
+      }
+
+      header h1 {
+        font-size: 1.5rem;
+      }
+
+      header small {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+      }
+
+      main {
+        display: grid;
+        grid-template-columns: 420px 1fr;
+        gap: 1.5rem;
+        padding: 1.5rem 2rem 2rem;
+        flex: 1;
+      }
+
+      main > section,
+      #field-editor,
+      #diagnostics-panel,
+      #csv-table-panel {
+        background: rgba(15, 23, 42, 0.75);
+        border: 1px solid var(--surface-border);
+        border-radius: 1.25rem;
+        padding: 1.25rem;
+        backdrop-filter: blur(16px);
+      }
+
+      .controls-section {
+        display: flex;
+        flex-direction: column;
+        gap: 1.25rem;
+        height: fit-content;
+        max-height: calc(100vh - 8rem);
+        overflow: auto;
+      }
+
+      .section-title {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        margin-bottom: 0.75rem;
+        gap: 1rem;
+      }
+
+      .section-title h2 {
+        font-size: 1rem;
+      }
+
+      .section-title button {
+        padding: 0.35rem 0.75rem;
+        font-size: 0.8rem;
+        border-radius: 0.6rem;
+      }
+
+      .field-group {
+        display: grid;
+        gap: 0.75rem;
+      }
+
+      label {
+        display: grid;
+        gap: 0.35rem;
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+      }
+
+      label span {
+        color: var(--text-primary);
+        font-weight: 500;
+      }
+
+      input,
+      select,
+      textarea {
+        border-radius: 0.75rem;
+        border: 1px solid var(--surface-border);
+        background: rgba(15, 23, 42, 0.55);
+        padding: 0.6rem 0.75rem;
+        min-height: 2.75rem;
+      }
+
+      textarea {
+        resize: vertical;
+      }
+
+      .inline-row {
+        display: flex;
+        gap: 0.75rem;
+        align-items: center;
+      }
+
+      .inline-row > * {
+        flex: 1;
+      }
+      #preview-panel {
+        display: grid;
+        grid-template-rows: auto 1fr;
+        gap: 0.75rem;
+      }
+
+      .preview-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .toolbar-group {
+        display: flex;
+        gap: 0.35rem;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .toolbar-group button {
+        padding: 0.4rem 0.65rem;
+        font-size: 0.8rem;
+      }
+
+      .toolbar-group input[type="range"] {
+        width: 150px;
+      }
+
+      .preview-wrapper {
+        position: relative;
+        overflow: hidden;
+        border-radius: 1rem;
+        background: rgba(2, 6, 23, 0.6);
+        border: 1px solid var(--surface-border);
+      }
+
+      .preview-scroll {
+        position: relative;
+        overflow: auto;
+        max-height: calc(100vh - 8rem);
+        outline: none;
+      }
+
+      #pdf-preview {
+        display: block;
+        width: 100%;
+      }
+
+      #field-overlay {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+
+      .field-box {
+        position: absolute;
+        border: 1px solid rgba(56, 189, 248, 0.6);
+        background: rgba(56, 189, 248, 0.08);
+        color: var(--text-primary);
+        font-size: 0.75rem;
+        line-height: 1;
+        border-radius: 0.65rem;
+        pointer-events: auto;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        overflow: hidden;
+      }
+
+      .field-box[data-hidden="true"] {
+        border-style: dashed;
+        background: transparent;
+        opacity: 0.4;
+      }
+
+      .field-box.selected {
+        border-width: 2px;
+        border-color: var(--accent);
+        box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.35);
+      }
+
+      .field-box-header {
+        background: rgba(56, 189, 248, 0.12);
+        padding: 0.35rem 0.5rem;
+        font-weight: 600;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .field-box-footer {
+        padding: 0.25rem 0.5rem;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+        color: rgba(226, 232, 240, 0.65);
+      }
+
+      .handle {
+        position: absolute;
+        width: 14px;
+        height: 14px;
+        background: var(--accent);
+        border-radius: 999px;
+        border: 2px solid var(--surface-raised);
+        pointer-events: auto;
+      }
+
+      .handle.nw {
+        top: -7px;
+        left: -7px;
+        cursor: nwse-resize;
+      }
+
+      .handle.ne {
+        top: -7px;
+        right: -7px;
+        cursor: nesw-resize;
+      }
+
+      .handle.sw {
+        bottom: -7px;
+        left: -7px;
+        cursor: nesw-resize;
+      }
+
+      .handle.se {
+        bottom: -7px;
+        right: -7px;
+        cursor: nwse-resize;
+      }
+
+      #grid-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        color: var(--text-secondary);
+        font-size: 0.85rem;
+      }
+
+      #grid-toggle input {
+        width: 1.1rem;
+        height: 1.1rem;
+      }
+
+      #field-editor {
+        margin: 0 2rem 2rem;
+        display: grid;
+        gap: 1rem;
+      }
+
+      #field-editor h2 {
+        font-size: 1.1rem;
+      }
+
+      .field-item {
+        display: grid;
+        gap: 0.5rem;
+        border: 1px solid var(--surface-border);
+        border-radius: 1rem;
+        padding: 0.75rem 1rem;
+        background: rgba(15, 23, 42, 0.65);
+      }
+
+      .field-item-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.75rem;
+      }
+
+      .field-item-controls {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        gap: 0.75rem;
+      }
+
+      .field-item button {
+        padding: 0.35rem 0.75rem;
+        font-size: 0.75rem;
+      }
+      #csv-table-panel,
+      #diagnostics-panel {
+        margin: 0 2rem 2rem;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.85rem;
+      }
+
+      th,
+      td {
+        padding: 0.5rem;
+        border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+        text-align: left;
+      }
+
+      tbody tr.error {
+        background: rgba(248, 113, 113, 0.12);
+      }
+
+      .status-pill {
+        padding: 0.25rem 0.6rem;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        font-weight: 600;
+      }
+
+      .status-pill.ok {
+        background: rgba(34, 197, 94, 0.18);
+        color: #bbf7d0;
+      }
+
+      .status-pill.error {
+        background: rgba(248, 113, 113, 0.18);
+        color: #fecaca;
+      }
+
+      .status-pill.warning {
+        background: rgba(250, 204, 21, 0.18);
+        color: #fef08a;
+      }
+
+      #progress-bar {
+        width: 100%;
+        height: 10px;
+        border-radius: 999px;
+        background: rgba(148, 163, 184, 0.18);
+        overflow: hidden;
+      }
+
+      #progress-bar span {
+        display: block;
+        height: 100%;
+        background: var(--accent);
+        width: 0%;
+        transition: width 0.2s ease;
+      }
+
+      .toast {
+        position: fixed;
+        top: 1.5rem;
+        right: 1.5rem;
+        background: var(--surface-raised);
+        border: 1px solid var(--surface-border);
+        border-radius: 1rem;
+        padding: 1rem 1.25rem;
+        box-shadow: 0 24px 48px rgba(15, 23, 42, 0.35);
+        z-index: 1000;
+        max-width: 320px;
+      }
+
+      .toast h3 {
+        margin-bottom: 0.35rem;
+        font-size: 1rem;
+      }
+
+      #diagnostics-log {
+        font-family: "Roboto Mono", monospace;
+        font-size: 0.75rem;
+        max-height: 200px;
+        overflow: auto;
+        background: rgba(15, 23, 42, 0.6);
+        border-radius: 0.75rem;
+        padding: 0.75rem;
+        border: 1px solid rgba(148, 163, 184, 0.15);
+        white-space: pre-wrap;
+      }
+
+      #diagnostics-log span {
+        display: block;
+        margin-bottom: 0.35rem;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+
+      .muted {
+        color: var(--text-secondary);
+      }
+
+      .danger {
+        color: var(--danger);
+      }
+
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        padding: 0.2rem 0.5rem;
+        border-radius: 999px;
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        font-size: 0.7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+      }
+
+      .toolbar-group .badge {
+        border: none;
+        background: rgba(148, 163, 184, 0.1);
+        color: var(--text-secondary);
+      }
+
+      .switch {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.65rem;
+        cursor: pointer;
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+      }
+
+      .switch input {
+        appearance: none;
+        width: 2.5rem;
+        height: 1.25rem;
+        border-radius: 999px;
+        border: 1px solid var(--surface-border);
+        background: rgba(148, 163, 184, 0.2);
+        position: relative;
+        transition: background 0.2s ease;
+      }
+
+      .switch input:checked {
+        background: rgba(56, 189, 248, 0.45);
+      }
+
+      .switch input::after {
+        content: "";
+        position: absolute;
+        top: 1px;
+        left: 1px;
+        width: 1rem;
+        height: 1rem;
+        border-radius: 50%;
+        background: white;
+        transition: transform 0.2s ease;
+      }
+
+      .switch input:checked::after {
+        transform: translateX(1.2rem);
+      }
+
+      .sr-only {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        border: 0;
+      }
+
+      @media (max-width: 1200px) {
+        main {
+          grid-template-columns: 1fr;
+        }
+
+        .controls-section {
+          max-height: none;
+        }
+
+        #preview-panel {
+          min-height: 60vh;
+        }
+      }
+
+      @media (max-width: 720px) {
+        header {
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 0.75rem;
+        }
+
+        .preview-toolbar {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+
+        .toolbar-group {
+          width: 100%;
+        }
+
+        .toolbar-group button,
+        .toolbar-group input[type="range"] {
+          flex: 1;
+        }
+      }
+    </style>
   </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+  <body class="theme-dark">
+    <header>
+      <div>
+        <h1>Certificate Layout Studio</h1>
+        <small>
+          Pure client-side generator with pixel-perfect PDF overlay, modular grid,
+          Indic raster fallback, and CSV validation pipeline.
+        </small>
+      </div>
+      <div class="toolbar-group" role="group" aria-label="Primary actions">
+        <button type="button" id="generate-all" aria-label="Generate all certificates">
+          Generate PDFs
+        </button>
+        <button type="button" id="merge-all" aria-label="Generate merged PDF">
+          Merge &amp; Download
+        </button>
+        <button type="button" id="download-config" aria-label="Export configuration">
+          Export Config
+        </button>
+        <label class="switch" aria-label="Toggle light theme">
+          <span>Light Mode</span>
+          <input type="checkbox" id="theme-toggle" />
+        </label>
+      </div>
+    </header>
+    <main>
+      <section class="controls-section" id="control-panel">
+        <div>
+          <div class="section-title">
+            <h2>Template &amp; Data</h2>
+            <span class="badge">Step 1</span>
+          </div>
+          <div class="field-group" aria-label="Template selection and data">
+            <label>
+              <span>Template</span>
+              <select id="template-select" aria-label="Select PDF template">
+                <option value="bihar">Bihar</option>
+                <option value="bokaro">Bokaro</option>
+                <option value="gram_panchayat">Gram Panchayat</option>
+                <option value="lalpania">Lalpania</option>
+                <option value="nawadih">Nawadih</option>
+                <option value="up">Uttar Pradesh</option>
+              </select>
+            </label>
+            <label>
+              <span>CSV Data</span>
+              <input
+                type="file"
+                id="csv-input"
+                accept=".csv"
+                aria-label="Upload CSV data file"
+              />
+            </label>
+            <label>
+              <span>Custom Template PDF (optional)</span>
+              <input
+                type="file"
+                id="custom-template"
+                accept="application/pdf"
+                aria-label="Upload custom PDF template"
+              />
+            </label>
+          </div>
+        </div>
+        <div>
+          <div class="section-title">
+            <h2>Fonts &amp; Rendering</h2>
+            <span class="badge">Step 2</span>
+          </div>
+          <div class="field-group" aria-label="Font configuration">
+            <label>
+              <span>Primary Font (TTF/OTF)</span>
+              <input
+                type="file"
+                id="primary-font"
+                accept=".ttf,.otf"
+                aria-label="Upload primary font"
+              />
+            </label>
+            <label>
+              <span>Bold Font (TTF/OTF)</span>
+              <input
+                type="file"
+                id="bold-font"
+                accept=".ttf,.otf"
+                aria-label="Upload bold font"
+              />
+            </label>
+            <label class="switch">
+              <span>Force raster fallback globally</span>
+              <input type="checkbox" id="force-raster-global" />
+            </label>
+            <div class="inline-row" role="group" aria-label="Unit and naming">
+              <label>
+                <span>Units</span>
+                <select id="unit-switcher" aria-label="Change measurement units">
+                  <option value="pt">Points (pt)</option>
+                  <option value="mm">Millimetres (mm)</option>
+                </select>
+              </label>
+              <label>
+                <span>File naming template</span>
+                <input
+                  type="text"
+                  id="filename-template"
+                  value="{CATEGORY}_{NAME}.pdf"
+                  aria-label="Naming template for generated files"
+                />
+              </label>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="section-title">
+            <h2>QR Options</h2>
+            <span class="badge">Step 3</span>
+          </div>
+          <div class="field-group" aria-label="QR configuration">
+            <label>
+              <span>QR Mode</span>
+              <select id="qr-mode" aria-label="Select QR mode">
+                <option value="csv">Per Row (from CSV)</option>
+                <option value="file">Single Image Upload</option>
+                <option value="none">Disable QR</option>
+              </select>
+            </label>
+            <label>
+              <span>QR Image (if Single)</span>
+              <input
+                type="file"
+                id="qr-image"
+                accept="image/png, image/jpeg"
+                aria-label="Upload QR image"
+              />
+            </label>
+            <div class="inline-row" role="group" aria-label="QR quality options">
+              <label>
+                <span>Error correction level</span>
+                <select id="qr-ecc" aria-label="QR error correction">
+                  <option value="L">L - 7%</option>
+                  <option value="M" selected>M - 15%</option>
+                  <option value="Q">Q - 25%</option>
+                  <option value="H">H - 30%</option>
+                </select>
+              </label>
+              <label>
+                <span>Quiet zone (pt)</span>
+                <input
+                  type="number"
+                  id="qr-quiet"
+                  value="8"
+                  min="0"
+                  step="1"
+                  aria-label="QR quiet zone"
+                />
+              </label>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="section-title">
+            <h2>Generation</h2>
+            <span class="badge">Step 4</span>
+          </div>
+          <div class="field-group" aria-label="Generation controls">
+            <div id="progress-bar" aria-hidden="true">
+              <span></span>
+            </div>
+            <p id="generation-status" class="muted" role="status"></p>
+            <div class="inline-row" role="group" aria-label="Generation options">
+              <label>
+                <span>Batch size</span>
+                <input
+                  type="number"
+                  id="batch-size"
+                  min="10"
+                  max="100"
+                  step="10"
+                  value="50"
+                  aria-label="Batch size for generation"
+                />
+              </label>
+              <label>
+                <span>Merged filename</span>
+                <input
+                  type="text"
+                  id="merged-filename"
+                  value="Certificates_Merged.pdf"
+                  aria-label="Filename for merged PDF"
+                />
+              </label>
+            </div>
+            <label class="switch">
+              <span>Show diagnostics during generation</span>
+              <input type="checkbox" id="diagnostics-toggle" checked />
+            </label>
+            <div class="inline-row" role="group" aria-label="Config actions">
+              <button type="button" id="reset-config" aria-label="Reset template configuration">
+                Reset Template Config
+              </button>
+              <label class="switch">
+                <span>Persist per template</span>
+                <input type="checkbox" id="persist-config" checked />
+              </label>
+            </div>
+            <label>
+              <span>Import Config JSON</span>
+              <input
+                type="file"
+                id="config-import"
+                accept="application/json"
+                aria-label="Import configuration JSON"
+              />
+            </label>
+          </div>
+        </div>
+      </section>
+      <section id="preview-panel" aria-label="PDF preview">
+        <div class="preview-toolbar" role="toolbar">
+          <div class="toolbar-group">
+            <button type="button" id="zoom-out" aria-label="Zoom out">−</button>
+            <input
+              type="range"
+              id="zoom-slider"
+              min="0.25"
+              max="2"
+              step="0.05"
+              value="1"
+              aria-label="Zoom level"
+            />
+            <button type="button" id="zoom-in" aria-label="Zoom in">+</button>
+            <span class="badge" id="zoom-label">100%</span>
+          </div>
+          <div class="toolbar-group">
+            <button type="button" id="pan-reset" aria-label="Reset pan">Reset View</button>
+            <label id="grid-toggle">
+              <input type="checkbox" id="grid-visible" checked aria-label="Toggle grid visibility" />
+              <span>Show Grid</span>
+            </label>
+            <span class="badge">Hold Alt to disable snapping, Space to pan</span>
+          </div>
+        </div>
+        <div class="preview-wrapper">
+          <div class="preview-scroll" tabindex="0" aria-label="PDF canvas viewport">
+            <canvas id="pdf-preview" aria-hidden="true"></canvas>
+            <div id="field-overlay" aria-hidden="true"></div>
+            <canvas id="grid-canvas" aria-hidden="true" class="hidden"></canvas>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <section id="field-editor" aria-label="Field list editor">
+      <div class="section-title">
+        <h2>Field Catalogue</h2>
+        <span class="badge">Adjust, duplicate, or hide fields</span>
+      </div>
+      <div id="field-list" class="field-group"></div>
+    </section>
+
+    <section id="csv-table-panel" aria-label="CSV validation results">
+      <div class="section-title">
+        <h2>CSV Validation</h2>
+        <span class="badge">Live feedback</span>
+      </div>
+      <div id="csv-summary" class="muted"></div>
+      <div class="preview-wrapper" style="max-height: 320px; overflow: auto;">
+        <table aria-label="CSV rows preview">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Status</th>
+              <th>Message</th>
+            </tr>
+          </thead>
+          <tbody id="csv-table"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="diagnostics-panel" aria-label="Diagnostics panel">
+      <div class="section-title">
+        <h2>Diagnostics</h2>
+        <button type="button" id="clear-diagnostics" aria-label="Clear diagnostics log">
+          Clear Log
+        </button>
+      </div>
+      <div id="diagnostics-log" role="log" aria-live="polite"></div>
+    </section>
+
+    <div class="sr-only" id="live-region" aria-live="assertive"></div>
+
+    <div id="toast-container" aria-live="polite" aria-atomic="true"></div>
+
+    <canvas id="raster-canvas" width="0" height="0" class="hidden"></canvas>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" integrity="sha512-P1UbXSJeL8rTkbZjkTV7gJWD2FoqB3Ye4DEHDA0NwtaYiQWmuQrd9cpX8R0gvcC8mNMNsQ0PmO/5CmOIwKcPdg==" crossorigin="anonymous"></script>
+    <script>
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js" integrity="sha512-RMURZjGvRvX82LM6SQK3yPXpYFjC5rV+a20SO3M3Fb/ZFX63ii7YB+NBsK9R5G3mvfATiCjEeUYTWz5sSyhMCg==" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js" integrity="sha512-wgjreSgf0CqJXd0FKyrLEXzskdZO5tdEoJEB6Digw1VE3DybMT0SqnX+0Gooy2cuglRez2oJ6TP2RFxzdA6A2g==" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" integrity="sha512-a0lXUZgF0P0Yok3mgaBeAD7iEtCjQKxHXpRPEfv+DE9rDzZ0uxNJbMr5tDF3fVCcPiTzJppJMPYK8I/nt3/68g==" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js" integrity="sha512-hLQ8z3n7bm3Hz3s/yXsPqt3SwypeqKq7kGeXH/JQ5NsJyggQ6si0B6GyF/FbR1i3i8b3I1JMABhGdUjGdZ0jQw==" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js" integrity="sha512-F1g7gYwh05rq6ArlTc95xJMu38xpv8uKUaX4nHCqB59NAH3F8CPuU7LWpC8IAE7Dyv4fRNw20WIJ/MhfJGoiXw==" crossorigin="anonymous"></script>
+    <script>
+      (function () {
+        const { PDFDocument, StandardFonts, rgb } = window.PDFLib;
+
+        /** Utility helpers */
+        const utils = (() => {
+          const POINTS_PER_MM = 72 / 25.4;
+          const REQUIRED_HEADERS = [
+            "category",
+            "name",
+            "sex",
+            "dob",
+            "place_of_birth",
+            "name_of_mother",
+            "aadhaar_mother",
+            "name_of_father",
+            "aadhaar_father",
+            "address_at_birth",
+            "permanent_address",
+            "registration_number",
+            "date_of_registration",
+            "date_of_issue",
+            "updated_on",
+            "qr_content",
+          ];
+
+          const COMPLEX_RANGE = /[\u0900-\u0DFF\u1CD0-\u1CFF\uA800-\uA82F]/;
+
+          const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+          const snap = (value, step) => Math.round(value / step) * step;
+          const mmToPt = (mm) => mm * POINTS_PER_MM;
+          const ptToMm = (pt) => pt / POINTS_PER_MM;
+          const isTruthy = (value) =>
+            value !== undefined && value !== null && String(value).trim() !== "";
+
+          const parseDate = (raw) => {
+            if (!isTruthy(raw)) return null;
+            const value = String(raw).trim().replace(/[./]/g, "-");
+            const parts = value.split(/[-\s]/).filter(Boolean);
+            let year, month, day;
+            if (parts.length === 3) {
+              if (parts[0].length === 4) {
+                [year, month, day] = parts;
+              } else if (parts[2].length === 4) {
+                [day, month, year] = parts;
+              }
+            } else if (parts.length === 1 && parts[0].length === 8) {
+              const token = parts[0];
+              year = token.slice(0, 4);
+              month = token.slice(4, 6);
+              day = token.slice(6, 8);
+            }
+            const date = year
+              ? new Date(Number(year), Number(month) - 1, Number(day))
+              : new Date(value);
+            if (Number.isNaN(date.getTime())) return null;
+            const iso = date.toISOString();
+            return {
+              iso,
+              formatted: formatDate(date, "DD-MM-YYYY"),
+            };
+          };
+
+          const formatDate = (date, format = "DD-MM-YYYY") => {
+            if (!(date instanceof Date)) return "";
+            const tokens = {
+              DD: String(date.getDate()).padStart(2, "0"),
+              MM: String(date.getMonth() + 1).padStart(2, "0"),
+              YYYY: String(date.getFullYear()),
+              YY: String(date.getFullYear()).slice(-2),
+              HH: String(date.getHours()).padStart(2, "0"),
+              mm: String(date.getMinutes()).padStart(2, "0"),
+              ss: String(date.getSeconds()).padStart(2, "0"),
+            };
+            return format.replace(/DD|MM|YYYY|YY|HH|mm|ss/g, (token) => tokens[token]);
+          };
+
+          const kolkataFormatter = new Intl.DateTimeFormat("en-IN", {
+            timeZone: "Asia/Kolkata",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            hour12: false,
+          });
+
+          const formatKolkataNow = (format = "DD-MM-YYYY HH:mm:ss") => {
+            try {
+              const parts = Object.fromEntries(
+                kolkataFormatter
+                  .formatToParts(new Date())
+                  .map((part) => [part.type, part.value])
+              );
+              return format
+                .replace(/DD/g, parts.day)
+                .replace(/MM/g, parts.month)
+                .replace(/YYYY/g, parts.year)
+                .replace(/HH/g, parts.hour)
+                .replace(/mm/g, parts.minute)
+                .replace(/ss/g, parts.second);
+            } catch (error) {
+              return formatDate(new Date(), format);
+            }
+          };
+
+          const sanitiseFilename = (value) =>
+            value
+              .replace(/[\n\\/:*?"<>|]+/g, "-")
+              .replace(/\s+/g, "_")
+              .replace(/_+/g, "_")
+              .replace(/^_+|_+$/g, "")
+              .slice(0, 80) || "certificate";
+
+          const safeLast4 = (value) => {
+            const digits = String(value || "").replace(/\D/g, "");
+            if (!digits) return "";
+            return digits.slice(-4).padStart(digits.length, "*");
+          };
+
+          const requestIdle = () =>
+            new Promise((resolve) =>
+              ("requestIdleCallback" in window
+                ? window.requestIdleCallback(resolve, { timeout: 150 })
+                : window.setTimeout(resolve, 16))
+            );
+
+          return {
+            clamp,
+            snap,
+            mmToPt,
+            ptToMm,
+            parseDate,
+            formatDate,
+            formatKolkataNow,
+            sanitiseFilename,
+            safeLast4,
+            requestIdle,
+            REQUIRED_HEADERS,
+            COMPLEX_RANGE,
+            POINTS_PER_MM,
+            isTruthy,
+          };
+        })();
+
+        /** Diagnostics */
+        const diagnostics = (() => {
+          const logContainer = document.getElementById("diagnostics-log");
+          const liveRegion = document.getElementById("live-region");
+          const MAX_LOGS = 20;
+          let entries = [];
+
+          const mask = (message) =>
+            String(message).replace(/(\d{4})(\d{4})(\d{4})/g, (match) => {
+              return `${match.slice(0, -4).replace(/\d/g, "*")}${match.slice(-4)}`;
+            });
+
+          const render = () => {
+            if (!logContainer) return;
+            logContainer.innerHTML = entries
+              .map((entry) => `<span>[${entry.time}] ${entry.type}: ${entry.msg}</span>`)
+              .join("");
+            logContainer.scrollTop = logContainer.scrollHeight;
+          };
+
+          const add = (type, message) => {
+            const time = utils.formatDate(new Date(), "DD-MM-YYYY HH:mm:ss");
+            entries.push({ time, type, msg: mask(message) });
+            entries = entries.slice(-MAX_LOGS);
+            render();
+          };
+
+          const clear = () => {
+            entries = [];
+            render();
+          };
+
+          const announce = (message) => {
+            if (liveRegion) {
+              liveRegion.textContent = message;
+            }
+          };
+
+          return { add, clear, announce };
+        })();
+
+        /** Toasts */
+        const toastModule = (() => {
+          const container = document.getElementById("toast-container");
+          const show = (title, description) => {
+            if (!container) return;
+            const toast = document.createElement("div");
+            toast.className = "toast";
+            toast.innerHTML = `<h3>${title}</h3><p class="muted">${
+              description || ""
+            }</p>`;
+            container.appendChild(toast);
+            window.setTimeout(() => {
+              toast.style.opacity = "0";
+              toast.style.transform = "translateY(-10px)";
+              window.setTimeout(() => toast.remove(), 300);
+            }, 3500);
+          };
+          return { show };
+        })();
+
+        /** Baseline configuration */
+        const configStore = (() => {
+          const templatePaths = {
+            bihar: "/templates/BIHAR_1761131265878.pdf",
+            bokaro: "/templates/BOKARO_1761131265881.pdf",
+            gram_panchayat: "/templates/GRAM PRANCHAT_1761131265885.pdf",
+            lalpania: "/templates/LALPANIA_1761131265888.pdf",
+            nawadih: "/templates/NAWADIH_1761131265893.pdf",
+            up: "/templates/UP_1761131265897.pdf",
+          };
+
+          const baseFields = {
+            name: {
+              x: 150,
+              y: 520,
+              w: 300,
+              h: 28,
+              size: 22,
+              minSize: 10,
+              font: "bold",
+              align: "center",
+              clearBox: true,
+              fitMode: "shrink",
+            },
+            sex: {
+              x: 460,
+              y: 520,
+              w: 80,
+              h: 22,
+              size: 14,
+              minSize: 10,
+              font: "primary",
+              align: "center",
+              fitMode: "shrink",
+            },
+            dob: {
+              x: 150,
+              y: 485,
+              w: 180,
+              h: 22,
+              size: 14,
+              minSize: 10,
+              font: "primary",
+              align: "center",
+              fitMode: "shrink",
+            },
+            place_of_birth: {
+              x: 360,
+              y: 485,
+              w: 220,
+              h: 22,
+              size: 12,
+              minSize: 10,
+              font: "primary",
+              align: "left",
+              fitMode: "shrink",
+            },
+            name_of_mother: {
+              x: 180,
+              y: 450,
+              w: 280,
+              h: 22,
+              size: 12,
+              minSize: 10,
+              font: "primary",
+              align: "left",
+              fitMode: "shrink",
+            },
+            name_of_father: {
+              x: 180,
+              y: 420,
+              w: 280,
+              h: 22,
+              size: 12,
+              minSize: 10,
+              font: "primary",
+              align: "left",
+              fitMode: "shrink",
+            },
+            aadhaar_mother: {
+              x: 180,
+              y: 390,
+              w: 150,
+              h: 20,
+              size: 11,
+              minSize: 9,
+              font: "primary",
+              align: "left",
+              fitMode: "ellipsis",
+            },
+            aadhaar_father: {
+              x: 380,
+              y: 390,
+              w: 150,
+              h: 20,
+              size: 11,
+              minSize: 9,
+              font: "primary",
+              align: "left",
+              fitMode: "ellipsis",
+            },
+            address_at_birth: {
+              x: 150,
+              y: 350,
+              w: 200,
+              h: 40,
+              size: 11,
+              minSize: 9,
+              font: "primary",
+              align: "left",
+              fitMode: "wrap",
+              lineHeight: 1.25,
+            },
+            permanent_address: {
+              x: 370,
+              y: 350,
+              w: 200,
+              h: 40,
+              size: 11,
+              minSize: 9,
+              font: "primary",
+              align: "left",
+              fitMode: "wrap",
+              lineHeight: 1.25,
+            },
+            registration_number: {
+              x: 180,
+              y: 300,
+              w: 180,
+              h: 20,
+              size: 12,
+              minSize: 9,
+              font: "primary",
+              align: "left",
+              fitMode: "shrink",
+            },
+            date_of_registration: {
+              x: 400,
+              y: 300,
+              w: 150,
+              h: 20,
+              size: 12,
+              minSize: 9,
+              font: "primary",
+              align: "left",
+              fitMode: "shrink",
+            },
+            date_of_issue: {
+              x: 150,
+              y: 240,
+              w: 150,
+              h: 20,
+              size: 12,
+              minSize: 9,
+              font: "primary",
+              align: "left",
+              fitMode: "shrink",
+            },
+            updated_on: {
+              x: 150,
+              y: 200,
+              w: 200,
+              h: 18,
+              size: 10,
+              minSize: 8,
+              font: "primary",
+              align: "left",
+              fitMode: "ellipsis",
+            },
+          };
+
+          const cloneFields = () => JSON.parse(JSON.stringify(baseFields));
+
+          const baseConfig = Object.fromEntries(
+            Object.keys(templatePaths).map((key) => [
+              key,
+              {
+                id: key,
+                name: key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+                path: templatePaths[key],
+                qr: { x: 470, y: 80, sizePt: 80 },
+                fields: cloneFields(),
+              },
+            ])
+          );
+
+          const storagePrefix = "cert-layout-config:";
+
+          const load = (templateId, persist) => {
+            if (!persist) {
+              return JSON.parse(JSON.stringify(baseConfig[templateId]));
+            }
+            const raw = window.localStorage.getItem(`${storagePrefix}${templateId}`);
+            if (raw) {
+              try {
+                return JSON.parse(raw);
+              } catch (error) {
+                diagnostics.add("warn", "Stored config invalid, using baseline.");
+              }
+            }
+            return JSON.parse(JSON.stringify(baseConfig[templateId]));
+          };
+
+          const save = (templateId, config, persist) => {
+            if (!persist) return;
+            window.localStorage.setItem(
+              `${storagePrefix}${templateId}`,
+              JSON.stringify(config)
+            );
+          };
+
+          const exportAll = (templateId, current) => {
+            const payload = {
+              version: 1,
+              templateId,
+              config: current,
+              timestamp: new Date().toISOString(),
+            };
+            return JSON.stringify(payload, null, 2);
+          };
+
+          return { load, save, exportAll, baseConfig };
+        })();
+
+
+      (function () {
+        const { PDFDocument, StandardFonts, rgb } = window.PDFLib;
+
+        const utils = (() => {
+          const POINTS_PER_MM = 72 / 25.4;
+          const REQUIRED_HEADERS = [
+            "category",
+            "name",
+            "sex",
+            "dob",
+            "place_of_birth",
+            "name_of_mother",
+            "aadhaar_mother",
+            "name_of_father",
+            "aadhaar_father",
+            "address_at_birth",
+            "permanent_address",
+            "registration_number",
+            "date_of_registration",
+            "date_of_issue",
+            "updated_on",
+            "qr_content",
+          ];
+          const COMPLEX_RANGE = /[ऀ-෿᳐-᳿ꠀ-꠯]/;
+          const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+          const snap = (value, step) => Math.round(value / step) * step;
+          const mmToPt = (mm) => mm * POINTS_PER_MM;
+          const ptToMm = (pt) => pt / POINTS_PER_MM;
+          const isTruthy = (value) => value !== undefined && value !== null && String(value).trim() !== "";
+          const formatDate = (date, format = "DD-MM-YYYY") => {
+            if (!(date instanceof Date)) return "";
+            const tokens = {
+              DD: String(date.getDate()).padStart(2, "0"),
+              MM: String(date.getMonth() + 1).padStart(2, "0"),
+              YYYY: String(date.getFullYear()),
+              YY: String(date.getFullYear()).slice(-2),
+              HH: String(date.getHours()).padStart(2, "0"),
+              mm: String(date.getMinutes()).padStart(2, "0"),
+              ss: String(date.getSeconds()).padStart(2, "0"),
+            };
+            return format.replace(/DD|MM|YYYY|YY|HH|mm|ss/g, (token) => tokens[token]);
+          };
+          const parseDate = (raw) => {
+            if (!isTruthy(raw)) return null;
+            const value = String(raw).trim().replace(/[./]/g, "-");
+            const parts = value.split(/[-\s]/).filter(Boolean);
+            let year, month, day;
+            if (parts.length === 3) {
+              if (parts[0].length === 4) {
+                [year, month, day] = parts;
+              } else if (parts[2].length === 4) {
+                [day, month, year] = parts;
+              }
+            } else if (parts.length === 1 && parts[0].length === 8) {
+              const token = parts[0];
+              year = token.slice(0, 4);
+              month = token.slice(4, 6);
+              day = token.slice(6, 8);
+            }
+            const date = year ? new Date(Number(year), Number(month) - 1, Number(day)) : new Date(value);
+            if (Number.isNaN(date.getTime())) return null;
+            return { iso: date.toISOString(), formatted: formatDate(date) };
+          };
+          const kolkataFormatter = new Intl.DateTimeFormat('en-IN', {
+            timeZone: 'Asia/Kolkata', year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+          });
+          const formatKolkataNow = (format = "DD-MM-YYYY HH:mm:ss") => {
+            try {
+              const parts = Object.fromEntries(kolkataFormatter.formatToParts(new Date()).map((p) => [p.type, p.value]));
+              return format
+                .replace(/DD/g, parts.day)
+                .replace(/MM/g, parts.month)
+                .replace(/YYYY/g, parts.year)
+                .replace(/HH/g, parts.hour)
+                .replace(/mm/g, parts.minute)
+                .replace(/ss/g, parts.second);
+            } catch (error) {
+              return formatDate(new Date(), format);
+            }
+          };
+          const sanitiseFilename = (value) =>
+            value.replace(/[
+\/:*?"<>|]+/g, '-').replace(/\s+/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '').slice(0, 80) || 'certificate';
+          const safeLast4 = (value) => {
+            const digits = String(value || '').replace(/\D/g, '');
+            if (!digits) return '';
+            return digits.slice(-4).padStart(digits.length, '*');
+          };
+          const requestIdle = () => new Promise((resolve) => (
+            'requestIdleCallback' in window
+              ? window.requestIdleCallback(resolve, { timeout: 150 })
+              : window.setTimeout(resolve, 16)
+          ));
+          return {
+            clamp,
+            snap,
+            mmToPt,
+            ptToMm,
+            parseDate,
+            formatDate,
+            formatKolkataNow,
+            sanitiseFilename,
+            safeLast4,
+            requestIdle,
+            REQUIRED_HEADERS,
+            COMPLEX_RANGE,
+            POINTS_PER_MM,
+            isTruthy,
+          };
+        })();
+
+const diagnostics = (() => {
+  const logContainer = document.getElementById('diagnostics-log');
+  const liveRegion = document.getElementById('live-region');
+  const MAX_LOGS = 20;
+  let entries = [];
+  const mask = (message) =>
+    String(message).replace(/\b(\d{5,})\b/g, (digits) => {
+      const visible = digits.slice(-4);
+      const hidden = '*'.repeat(digits.length - 4);
+      return `${hidden}${visible}`;
+    });
+  const render = () => {
+    if (!logContainer) return;
+    logContainer.innerHTML = entries.map((entry) => `<span>[${entry.time}] ${entry.type}: ${entry.msg}</span>`).join('');
+    logContainer.scrollTop = logContainer.scrollHeight;
+  };
+  const add = (type, message) => {
+    const time = utils.formatDate(new Date(), 'DD-MM-YYYY HH:mm:ss');
+    entries.push({ time, type, msg: mask(message) });
+    entries = entries.slice(-MAX_LOGS);
+    render();
+  };
+  const clear = () => {
+    entries = [];
+    render();
+  };
+  const announce = (message) => {
+    if (liveRegion) liveRegion.textContent = message;
+  };
+  return { add, clear, announce };
+})();
+
+const toast = (() => {
+  const container = document.getElementById('toast-container');
+  const show = (title, description) => {
+    if (!container) return;
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.innerHTML = `<h3>${title}</h3><p class="muted">${description || ''}</p>`;
+    container.appendChild(toast);
+    window.setTimeout(() => {
+      toast.style.opacity = '0';
+      toast.style.transform = 'translateY(-10px)';
+      window.setTimeout(() => toast.remove(), 300);
+    }, 3500);
+  };
+  return { show };
+})();
+
+const configStore = (() => {
+  const templatePaths = {
+    bihar: '/templates/BIHAR_1761131265878.pdf',
+    bokaro: '/templates/BOKARO_1761131265881.pdf',
+    gram_panchayat: '/templates/GRAM PRANCHAT_1761131265885.pdf',
+    lalpania: '/templates/LALPANIA_1761131265888.pdf',
+    nawadih: '/templates/NAWADIH_1761131265893.pdf',
+    up: '/templates/UP_1761131265897.pdf',
+  };
+  const baseFields = {
+    name: { x: 150, y: 520, w: 300, h: 28, size: 22, minSize: 10, font: 'bold', align: 'center', clearBox: true, fitMode: 'shrink' },
+    sex: { x: 460, y: 520, w: 80, h: 22, size: 14, minSize: 10, font: 'primary', align: 'center', fitMode: 'shrink' },
+    dob: { x: 150, y: 485, w: 180, h: 22, size: 14, minSize: 10, font: 'primary', align: 'center', fitMode: 'shrink' },
+    place_of_birth: { x: 360, y: 485, w: 220, h: 22, size: 12, minSize: 10, font: 'primary', align: 'left', fitMode: 'shrink' },
+    name_of_mother: { x: 180, y: 450, w: 280, h: 22, size: 12, minSize: 10, font: 'primary', align: 'left', fitMode: 'shrink' },
+    name_of_father: { x: 180, y: 420, w: 280, h: 22, size: 12, minSize: 10, font: 'primary', align: 'left', fitMode: 'shrink' },
+    aadhaar_mother: { x: 180, y: 390, w: 150, h: 20, size: 11, minSize: 9, font: 'primary', align: 'left', fitMode: 'ellipsis' },
+    aadhaar_father: { x: 380, y: 390, w: 150, h: 20, size: 11, minSize: 9, font: 'primary', align: 'left', fitMode: 'ellipsis' },
+    address_at_birth: { x: 150, y: 350, w: 200, h: 40, size: 11, minSize: 9, font: 'primary', align: 'left', fitMode: 'wrap', lineHeight: 1.25 },
+    permanent_address: { x: 370, y: 350, w: 200, h: 40, size: 11, minSize: 9, font: 'primary', align: 'left', fitMode: 'wrap', lineHeight: 1.25 },
+    registration_number: { x: 180, y: 300, w: 180, h: 20, size: 12, minSize: 9, font: 'primary', align: 'left', fitMode: 'shrink' },
+    date_of_registration: { x: 400, y: 300, w: 150, h: 20, size: 12, minSize: 9, font: 'primary', align: 'left', fitMode: 'shrink' },
+    date_of_issue: { x: 150, y: 240, w: 150, h: 20, size: 12, minSize: 9, font: 'primary', align: 'left', fitMode: 'shrink' },
+    updated_on: { x: 150, y: 200, w: 200, h: 18, size: 10, minSize: 8, font: 'primary', align: 'left', fitMode: 'ellipsis' },
+  };
+  const cloneFields = () => JSON.parse(JSON.stringify(baseFields));
+  const baseConfig = Object.fromEntries(Object.keys(templatePaths).map((key) => [
+    key,
+    { id: key, name: key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()), path: templatePaths[key], qr: { x: 470, y: 80, sizePt: 80 }, fields: cloneFields() },
+  ]));
+  const storagePrefix = 'cert-layout-config:';
+  const load = (templateId, persist) => {
+    if (!persist) return JSON.parse(JSON.stringify(baseConfig[templateId]));
+    const raw = window.localStorage.getItem(`${storagePrefix}${templateId}`);
+    if (raw) {
+      try {
+        return JSON.parse(raw);
+      } catch (error) {
+        diagnostics.add('warn', 'Stored config invalid, using baseline.');
+      }
+    }
+    return JSON.parse(JSON.stringify(baseConfig[templateId]));
+  };
+  const save = (templateId, config, persist) => {
+    if (!persist) return;
+    window.localStorage.setItem(`${storagePrefix}${templateId}`, JSON.stringify(config));
+  };
+  const exportAll = (templateId, current) => JSON.stringify({ version: 1, templateId, config: current, timestamp: new Date().toISOString() }, null, 2);
+  return { load, save, exportAll, baseConfig };
+})();
+
+const state = {
+  templateId: 'bihar',
+  config: configStore.load('bihar', true),
+  csvRows: [],
+  csvErrors: [],
+  csvSummary: '',
+  fonts: { primary: null, bold: null },
+  fontFaces: {},
+  qrMode: 'csv',
+  qrImage: null,
+  qrOptions: { ecc: 'M', quiet: 8 },
+  templateBytes: null,
+  customTemplate: null,
+  view: { zoom: 1, panX: 0, panY: 0, showGrid: true, unit: 'pt', forceRaster: false },
+  selection: null,
+  progress: 0,
+  isGenerating: false,
+  generationCancelled: false,
+  outputNameTemplate: '{CATEGORY}_{NAME}.pdf',
+  updatedOnFormat: 'DD-MM-YYYY HH:mm:ss',
+};
+
+const fontModule = (() => {
+  const loadFontFace = async (file, name) => {
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+    const fontFace = new FontFace(name, `url(${dataUrl})`);
+    await fontFace.load();
+    document.fonts.add(fontFace);
+    return { fontFace, dataUrl };
+  };
+
+  const registerFont = async (type, file) => {
+    diagnostics.add('info', `Loading ${type} font: ${file.name}`);
+    const data = await file.arrayBuffer();
+    const { fontFace, dataUrl } = await loadFontFace(file, `font-${type}-${Date.now()}`);
+    state.fonts[type] = { data, name: fontFace.family, dataUrl };
+    toast.show('Font loaded', `${type} font ${file.name}`);
+  };
+
+  const embedFont = async (pdfDoc, type) => {
+    const descriptor = state.fonts[type];
+    if (!descriptor) {
+      const font = await pdfDoc.embedFont(StandardFonts.Helvetica, { subset: false });
+      return { font, name: 'Helvetica' };
+    }
+    const font = await pdfDoc.embedFont(descriptor.data, { subset: false });
+    return { font, name: descriptor.name };
+  };
+
+  return { registerFont, embedFont };
+})();
+
+const csvModule = (() => {
+  const tbody = document.getElementById('csv-table');
+  const summary = document.getElementById('csv-summary');
+
+  const parse = (file) => new Promise((resolve, reject) => {
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      transformHeader: (header) => header.trim().toLowerCase(),
+      complete: resolve,
+      error: reject,
+    });
+  });
+
+  const validateRow = (row, index) => {
+    const issues = [];
+    for (const header of utils.REQUIRED_HEADERS) {
+      if (!utils.isTruthy(row[header])) {
+        issues.push(`${header} missing`);
+      }
+    }
+    const dateFields = ['dob', 'date_of_registration', 'date_of_issue'];
+    dateFields.forEach((key) => {
+      const parsed = utils.parseDate(row[key]);
+      if (!parsed) {
+        issues.push(`${key} invalid`);
+      } else {
+        row[key] = parsed.formatted;
+      }
+    });
+    if (!utils.isTruthy(row.updated_on)) {
+      row.updated_on = utils.formatKolkataNow(state.updatedOnFormat);
+    }
+    return { index, row, issues };
+  };
+
+  const renderTable = () => {
+    if (!tbody) return;
+    tbody.innerHTML = state.csvRows
+      .map((item, idx) => {
+        const issues = state.csvErrors[idx] || [];
+        const status = issues.length ? 'error' : 'ok';
+        const message = issues.join(', ') || 'Ready';
+        return `<tr class="${status === 'error' ? 'error' : ''}"><td>${idx + 1}</td><td><span class="status-pill ${status}">${status.toUpperCase()}</span></td><td>${message}</td></tr>`;
+      })
+      .join('');
+    if (summary) {
+      const errors = state.csvErrors.filter((x) => x.length).length;
+      summary.textContent = errors
+        ? `${errors} rows require attention before export.`
+        : `${state.csvRows.length} rows ready for export.`;
+    }
+  };
+
+  const process = async (file) => {
+    try {
+      const result = await parse(file);
+      const rows = result.data.filter((row) => Object.values(row).some(utils.isTruthy));
+      state.csvRows = rows;
+      state.csvErrors = rows.map((row, index) => validateRow(row, index).issues);
+      renderTable();
+      toast.show('CSV loaded', `${rows.length} rows parsed`);
+    } catch (error) {
+      toast.show('CSV error', 'Failed to parse CSV file.');
+      diagnostics.add('error', error.message || 'CSV parsing failed');
+    }
+  };
+
+  return { process, renderTable };
+})();
+
+const previewModule = (() => {
+  const canvas = document.getElementById('pdf-preview');
+  const overlay = document.getElementById('field-overlay');
+  const gridCanvas = document.getElementById('grid-canvas');
+  const scroll = document.querySelector('.preview-scroll');
+
+  const renderPDF = async (bytes) => {
+    if (!canvas) return;
+    const pdf = await window.pdfjsLib.getDocument({ data: bytes }).promise;
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewport({ scale: 1 });
+    canvas.width = viewport.width * state.view.zoom;
+    canvas.height = viewport.height * state.view.zoom;
+    const context = canvas.getContext('2d');
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    const renderContext = {
+      canvasContext: context,
+      viewport: page.getViewport({ scale: state.view.zoom }),
+    };
+    await page.render(renderContext).promise;
+    drawGrid(viewport.width, viewport.height);
+    layoutModule.renderFields();
+  };
+
+  const drawGrid = (width, height) => {
+    if (!gridCanvas) return;
+    const zoom = state.view.zoom;
+    gridCanvas.width = width * zoom;
+    gridCanvas.height = height * zoom;
+    gridCanvas.classList.toggle('hidden', !state.view.showGrid);
+    if (!state.view.showGrid) return;
+    const ctx = gridCanvas.getContext('2d');
+    ctx.clearRect(0, 0, gridCanvas.width, gridCanvas.height);
+    ctx.strokeStyle = 'rgba(148,163,184,0.2)';
+    ctx.lineWidth = 1;
+    const step = 10 * zoom;
+    for (let x = 0; x <= gridCanvas.width; x += step) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, gridCanvas.height);
+      ctx.stroke();
+    }
+    for (let y = 0; y <= gridCanvas.height; y += step) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(gridCanvas.width, y);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = 'rgba(56,189,248,0.35)';
+    const major = 50 * zoom;
+    for (let x = 0; x <= gridCanvas.width; x += major) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, gridCanvas.height);
+      ctx.stroke();
+    }
+    for (let y = 0; y <= gridCanvas.height; y += major) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(gridCanvas.width, y);
+      ctx.stroke();
+    }
+  };
+
+  const panBy = (dx, dy) => {
+    state.view.panX += dx;
+    state.view.panY += dy;
+    if (overlay) overlay.style.transform = `translate(${state.view.panX}px, ${state.view.panY}px)`;
+    if (gridCanvas) gridCanvas.style.transform = `translate(${state.view.panX}px, ${state.view.panY}px)`;
+    if (canvas) canvas.style.transform = `translate(${state.view.panX}px, ${state.view.panY}px)`;
+  };
+
+  const resetView = () => {
+    state.view.panX = 0;
+    state.view.panY = 0;
+    state.view.zoom = 1;
+    if (canvas) canvas.style.transform = 'translate(0, 0)';
+    if (overlay) overlay.style.transform = 'translate(0, 0)';
+    if (gridCanvas) gridCanvas.style.transform = 'translate(0, 0)';
+    document.getElementById('zoom-slider').value = '1';
+    document.getElementById('zoom-label').textContent = '100%';
+    if (state.templateBytes) renderPDF(state.templateBytes);
+  };
+
+  const setZoom = (value) => {
+    state.view.zoom = value;
+    document.getElementById('zoom-label').textContent = `${Math.round(value * 100)}%`;
+    if (state.templateBytes) renderPDF(state.templateBytes);
+  };
+
+  const loadTemplate = async () => {
+    try {
+      const persist = document.getElementById('persist-config');
+      state.config = configStore.load(state.templateId, persist && persist.checked);
+      if (state.customTemplate) {
+        const buffer = await state.customTemplate.arrayBuffer();
+        state.templateBytes = new Uint8Array(buffer);
+      } else {
+        const response = await fetch(state.config.path);
+        const arrayBuffer = await response.arrayBuffer();
+        state.templateBytes = new Uint8Array(arrayBuffer);
+      }
+      await renderPDF(state.templateBytes);
+      diagnostics.add('info', `Template ${state.templateId} loaded.`);
+    } catch (error) {
+      toast.show('Template error', 'Failed to load template PDF.');
+      diagnostics.add('error', error.message || 'Template load failed');
+    }
+  };
+
+  return { loadTemplate, renderPDF, drawGrid, panBy, resetView, setZoom, canvas, overlay };
+})();
+
+const layoutModule = (() => {
+  const overlay = previewModule.overlay;
+  const fieldList = document.getElementById('field-list');
+  const unitLabel = () => (state.view.unit === 'mm' ? 'mm' : 'pt');
+
+  const ptToDisplay = (value) =>
+    state.view.unit === 'mm' ? utils.ptToMm(value) : value;
+  const displayToPt = (value) =>
+    state.view.unit === 'mm' ? utils.mmToPt(value) : value;
+
+  const renderFields = () => {
+    if (!overlay) return;
+    overlay.innerHTML = '';
+    const zoom = state.view.zoom;
+    Object.entries(state.config.fields).forEach(([key, spec]) => {
+      const div = document.createElement('div');
+      div.className = 'field-box';
+      div.dataset.field = key;
+      if (spec.hidden) div.dataset.hidden = 'true';
+      const x = spec.x * zoom + state.view.panX;
+      const y = spec.y * zoom + state.view.panY;
+      const w = spec.w * zoom;
+      const h = spec.h * zoom;
+      div.style.left = `${x}px`;
+      div.style.bottom = `${y}px`;
+      div.style.width = `${w}px`;
+      div.style.height = `${h}px`;
+      div.innerHTML = `
+        <div class="field-box-header">${key}<button type="button" aria-label="Focus field ${key}" data-jump="${key}">⤢</button></div>
+        <div class="field-box-footer">${spec.align} • ${spec.fitMode || 'shrink'}</div>
+        <span class="handle nw" data-handle="nw"></span>
+        <span class="handle ne" data-handle="ne"></span>
+        <span class="handle sw" data-handle="sw"></span>
+        <span class="handle se" data-handle="se"></span>
+      `;
+      attachBoxEvents(div, key);
+      overlay.appendChild(div);
+    });
+    renderFieldList();
+  };
+
+  const renderFieldList = () => {
+    if (!fieldList) return;
+    fieldList.innerHTML = '';
+    const sorted = Object.keys(state.config.fields);
+    sorted.forEach((key) => {
+      const spec = state.config.fields[key];
+      const container = document.createElement('div');
+      container.className = 'field-item';
+      container.dataset.field = key;
+      container.innerHTML = `
+        <div class="field-item-header">
+          <strong>${key}</strong>
+          <div>
+            <button type="button" data-duplicate="${key}">Duplicate</button>
+            <label class="switch"><span>Visible</span><input type="checkbox" data-toggle="${key}" ${
+              spec.hidden ? '' : 'checked'
+            } /></label>
+          </div>
+        </div>
+        <div class="field-item-controls">
+          <label><span>X (${unitLabel()})</span><input type="number" data-key="x" data-field="${key}" value="${ptToDisplay(spec.x).toFixed(2)}" /></label>
+          <label><span>Y (${unitLabel()})</span><input type="number" data-key="y" data-field="${key}" value="${ptToDisplay(spec.y).toFixed(2)}" /></label>
+          <label><span>W (${unitLabel()})</span><input type="number" data-key="w" data-field="${key}" value="${ptToDisplay(spec.w).toFixed(2)}" /></label>
+          <label><span>H (${unitLabel()})</span><input type="number" data-key="h" data-field="${key}" value="${ptToDisplay(spec.h).toFixed(2)}" /></label>
+          <label><span>Size (pt)</span><input type="number" data-key="size" data-field="${key}" value="${spec.size}" /></label>
+          <label><span>Min size</span><input type="number" data-key="minSize" data-field="${key}" value="${spec.minSize || 10}" /></label>
+          <label><span>Fit</span><select data-key="fitMode" data-field="${key}">
+            ${['shrink', 'ellipsis', 'wrap'].map((mode) => `<option value="${mode}" ${spec.fitMode === mode ? 'selected' : ''}>${mode}</option>`).join('')}
+          </select></label>
+          <label><span>Align</span><select data-key="align" data-field="${key}">
+            ${['left', 'center', 'right'].map((mode) => `<option value="${mode}" ${spec.align === mode ? 'selected' : ''}>${mode}</option>`).join('')}
+          </select></label>
+          <label><span>Line height</span><input type="number" step="0.05" data-key="lineHeight" data-field="${key}" value="${spec.lineHeight || 1.25}" /></label>
+          <label><span>Max lines</span><input type="number" data-key="maxLines" data-field="${key}" value="${spec.maxLines || ''}" /></label>
+          <label><span>Letter spacing</span><input type="number" step="0.1" data-key="letterSpacing" data-field="${key}" value="${spec.letterSpacing || 0}" /></label>
+          <label class="switch"><span>Clear box</span><input type="checkbox" data-key="clearBox" data-field="${key}" ${spec.clearBox ? 'checked' : ''} /></label>
+          <label class="switch"><span>Raster text</span><input type="checkbox" data-key="forceRasterText" data-field="${key}" ${spec.forceRasterText ? 'checked' : ''} /></label>
+        </div>
+      `;
+      fieldList.appendChild(container);
+    });
+  };
+
+  const updateFieldValue = (field, key, value) => {
+    const spec = state.config.fields[field];
+    if (!spec) return;
+    if (['x', 'y', 'w', 'h'].includes(key)) {
+      spec[key] = displayToPt(Number(value));
+    } else if (['size', 'minSize', 'maxLines', 'letterSpacing', 'lineHeight'].includes(key)) {
+      spec[key] = Number(value);
+    } else if (['fitMode', 'align', 'nameTemplate'].includes(key)) {
+      spec[key] = value;
+    } else if (['clearBox', 'forceRasterText'].includes(key)) {
+      spec[key] = Boolean(value);
+    }
+    renderFields();
+  };
+
+  const duplicateField = (field) => {
+    const spec = state.config.fields[field];
+    if (!spec) return;
+    let idx = 1;
+    let newKey = `${field}_${idx}`;
+    while (state.config.fields[newKey]) {
+      idx += 1;
+      newKey = `${field}_${idx}`;
+    }
+    state.config.fields[newKey] = JSON.parse(JSON.stringify(spec));
+    renderFields();
+  };
+
+  const toggleVisibility = (field, visible) => {
+    const spec = state.config.fields[field];
+    if (!spec) return;
+    spec.hidden = !visible;
+    renderFields();
+  };
+
+  const attachBoxEvents = (box, field) => {
+    box.addEventListener('pointerdown', (event) => {
+      if (event.target.dataset.handle) return;
+      state.selection = field;
+      const start = { x: event.clientX, y: event.clientY };
+      const spec = state.config.fields[field];
+      const origin = { x: spec.x, y: spec.y };
+      const zoom = state.view.zoom;
+      const move = (e) => {
+        const dx = (e.clientX - start.x) / zoom;
+        const dy = (e.clientY - start.y) / zoom;
+        const alt = e.altKey;
+        let nx = origin.x + dx;
+        let ny = origin.y + dy;
+        if (!alt) {
+          nx = utils.snap(nx, 1);
+          ny = utils.snap(ny, 1);
+        }
+        spec.x = nx;
+        spec.y = ny;
+        renderFields();
+      };
+      const up = () => {
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        persistState();
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up, { once: true });
+    });
+    box.querySelectorAll('.handle').forEach((handle) => {
+      handle.addEventListener('pointerdown', (event) => {
+        event.stopPropagation();
+        const direction = handle.dataset.handle;
+        const spec = state.config.fields[field];
+        const start = { x: event.clientX, y: event.clientY };
+        const origin = { ...spec };
+        const zoom = state.view.zoom;
+        const move = (e) => {
+          const dx = (e.clientX - start.x) / zoom;
+          const dy = (e.clientY - start.y) / zoom;
+          let { x, y, w, h } = origin;
+          if (direction.includes('n')) {
+            h += dy;
+          } else {
+            h -= dy;
+          }
+          if (direction.includes('w')) {
+            w += dx;
+          } else {
+            w -= dx;
+          }
+          if (!e.altKey) {
+            w = utils.snap(w, 1);
+            h = utils.snap(h, 1);
+          }
+          spec.w = Math.max(10, w);
+          spec.h = Math.max(10, h);
+          renderFields();
+        };
+        const up = () => {
+          window.removeEventListener('pointermove', move);
+          window.removeEventListener('pointerup', up);
+          persistState();
+        };
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', up, { once: true });
+      });
+    });
+  };
+
+  const persistState = () => {
+    const persist = document.getElementById('persist-config');
+    configStore.save(state.templateId, state.config, persist && persist.checked);
+  };
+
+  return { renderFields, renderFieldList, updateFieldValue, duplicateField, toggleVisibility };
+})();
+
+const qrModule = (() => {
+  const generateFromText = async (text, size, ecc, quiet) => {
+    const qr = window.qrcode(0, ecc);
+    qr.addData(text);
+    qr.make();
+    const cellSize = Math.ceil((size - quiet * 2) / qr.getModuleCount());
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, size, size);
+    ctx.fillStyle = '#000000';
+    for (let row = 0; row < qr.getModuleCount(); row += 1) {
+      for (let col = 0; col < qr.getModuleCount(); col += 1) {
+        if (qr.isDark(row, col)) {
+          ctx.fillRect(quiet + col * cellSize, quiet + row * cellSize, cellSize, cellSize);
+        }
+      }
+    }
+    return canvas.toDataURL('image/png');
+  };
+
+  const buildPayload = (row) => {
+    const segments = [
+      `CERT|cat=${row.category}`,
+      `name=${row.name}`,
+      `reg=${row.registration_number}`,
+      `dob=${row.dob}`,
+      `m4=${utils.safeLast4(row.aadhaar_mother)}`,
+      `f4=${utils.safeLast4(row.aadhaar_father)}`,
+    ];
+    return segments.join('|');
+  };
+
+  return { generateFromText, buildPayload };
+})();
+
+const renderModule = (() => {
+  const rasterCanvas = document.getElementById('raster-canvas');
+
+  const measure = (font, text, size, letterSpacing = 0) => {
+    const width = font.widthOfTextAtSize(text, size);
+    return width + letterSpacing * (text.length - 1);
+  };
+
+  const drawSingleLine = (page, text, spec, font, size, options = {}) => {
+    const { align = 'left', letterSpacing = 0, clearBox } = spec;
+    if (clearBox) {
+      page.drawRectangle({
+        x: spec.x,
+        y: spec.y,
+        width: spec.w,
+        height: spec.h,
+        color: rgb(1, 1, 1),
+      });
+    }
+    let x = spec.x;
+    if (align === 'center') {
+      x = spec.x + (spec.w - measure(font, text, size, letterSpacing)) / 2;
+    } else if (align === 'right') {
+      x = spec.x + spec.w - measure(font, text, size, letterSpacing);
+    }
+    const y = spec.y + (spec.h - size) / 2;
+    page.drawText(text, {
+      x,
+      y,
+      size,
+      font,
+      color: rgb(0, 0, 0),
+      characterSpacing: letterSpacing,
+    });
+  };
+
+  const drawWrapped = (page, text, spec, font, size) => {
+    const words = String(text || '').split(/\s+/);
+    const lines = [];
+    const lineHeight = (spec.lineHeight || 1.25) * size;
+    const maxLines = spec.maxLines || Math.floor(spec.h / lineHeight);
+    let current = '';
+    words.forEach((word) => {
+      const candidate = current ? `${current} ${word}` : word;
+      if (measure(font, candidate, size, spec.letterSpacing || 0) <= spec.w) {
+        current = candidate;
+      } else {
+        lines.push(current);
+        current = word;
+      }
+    });
+    if (current) lines.push(current);
+    if (lines.length > maxLines) {
+      const truncated = lines.slice(0, maxLines);
+      truncated[maxLines - 1] = `${truncated[maxLines - 1] || ''}…`;
+      lines.length = maxLines;
+      lines.splice(0, truncated.length, ...truncated);
+    }
+    lines.forEach((line, index) => {
+      drawSingleLine(page, line, {
+        ...spec,
+        y: spec.y + spec.h - lineHeight * (index + 1),
+        h: lineHeight,
+      }, font, size, spec);
+    });
+  };
+
+  const drawTextFitted = (page, text, spec, font, size) => {
+    const fitMode = spec.fitMode || 'shrink';
+    const min = spec.minSize || 10;
+    const letterSpacing = spec.letterSpacing || 0;
+    if (fitMode === 'wrap') {
+      return drawWrapped(page, text, spec, font, size);
+    }
+    let s = size;
+    let width = measure(font, text, s, letterSpacing);
+    if (fitMode !== 'ellipsis') {
+      while (width > spec.w && s > min) {
+        s -= 0.5;
+        width = measure(font, text, s, letterSpacing);
+      }
+      if (width <= spec.w) {
+        return drawSingleLine(page, text, spec, font, s, { letterSpacing });
+      }
+    }
+    let truncated = text;
+    while (measure(font, `${truncated}…`, s, letterSpacing) > spec.w && truncated.length > 0) {
+      truncated = truncated.slice(0, -1);
+    }
+    drawSingleLine(page, `${truncated}…`, spec, font, Math.max(s, min), { letterSpacing });
+  };
+
+  const rasterText = async (text, spec, size, fontName) => {
+    const scale = 4;
+    const canvas = rasterCanvas;
+    const width = Math.ceil(spec.w * scale);
+    const height = Math.ceil(spec.h * scale);
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, width, height);
+    ctx.fillStyle = '#000000';
+    ctx.font = `${size * scale}px '${fontName}'`;
+    ctx.textBaseline = 'middle';
+    let x = 0;
+    if (spec.align === 'center') {
+      const metrics = ctx.measureText(text);
+      x = (width - metrics.width) / 2;
+    } else if (spec.align === 'right') {
+      const metrics = ctx.measureText(text);
+      x = width - metrics.width;
+    }
+    const y = height / 2;
+    ctx.fillText(text, x, y);
+    return canvas.toDataURL('image/png');
+  };
+
+  const drawField = async (page, row, fieldKey, fonts) => {
+    const spec = state.config.fields[fieldKey];
+    if (!spec || spec.hidden) return;
+    let value = row[fieldKey];
+    if (spec.nameTemplate) {
+      try {
+        const fn = new Function('row', `with(row){ return ${spec.nameTemplate}; }`);
+        value = fn(row);
+      } catch (error) {
+        diagnostics.add('warn', `Template error for ${fieldKey}`);
+      }
+    }
+    const type = spec.font === 'bold' ? 'bold' : 'primary';
+    const font = fonts[type];
+    const needsRaster = state.view.forceRaster || spec.forceRasterText || utils.COMPLEX_RANGE.test(String(value));
+    if (needsRaster) {
+      const dataUrl = await rasterText(value || '', spec, spec.size, font.name);
+      const png = await page.doc.embedPng(dataUrl);
+      page.drawImage(png, {
+        x: spec.x,
+        y: spec.y,
+        width: spec.w,
+        height: spec.h,
+      });
+      return;
+    }
+    drawTextFitted(page, value || '', spec, font.font, spec.size);
+  };
+
+  const createDocument = async () => PDFDocument.create();
+
+  const renderRow = async (row) => {
+    const pdfDoc = await createDocument();
+    const templatePdf = await PDFDocument.load(state.templateBytes);
+    const [templatePage] = await pdfDoc.copyPages(templatePdf, [0]);
+    const page = pdfDoc.addPage(templatePage);
+    const primary = await fontModule.embedFont(pdfDoc, 'primary');
+    const bold = await fontModule.embedFont(pdfDoc, 'bold');
+    page.doc = pdfDoc;
+    const fonts = { primary, bold };
+    const fieldKeys = Object.keys(state.config.fields);
+    for (const key of fieldKeys) {
+      await drawField(page, row, key, fonts);
+    }
+    if (state.qrMode !== 'none' && state.config.qr) {
+      try {
+        let dataUrl = null;
+        if (state.qrMode === 'file' && state.qrImage) {
+          dataUrl = await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.readAsDataURL(state.qrImage);
+          });
+        } else {
+          const payload = row.qr_content || qrModule.buildPayload(row);
+          dataUrl = await qrModule.generateFromText(payload, state.config.qr.sizePt, state.qrOptions.ecc, state.qrOptions.quiet);
+        }
+        const qrImage = await pdfDoc.embedPng(dataUrl);
+        page.drawImage(qrImage, {
+          x: state.config.qr.x,
+          y: state.config.qr.y,
+          width: state.config.qr.sizePt,
+          height: state.config.qr.sizePt,
+        });
+      } catch (error) {
+        diagnostics.add('warn', 'QR generation failed');
+      }
+    }
+    return pdfDoc.save();
+  };
+
+  return { renderRow };
+})();
+
+const generationModule = (() => {
+  const progressBar = document.querySelector('#progress-bar span');
+  const statusLabel = document.getElementById('generation-status');
+
+  const updateProgress = (value, message) => {
+    state.progress = value;
+    if (progressBar) progressBar.style.width = `${Math.round(value * 100)}%`;
+    if (statusLabel) statusLabel.textContent = message || '';
+  };
+
+  const nameForRow = (row) => {
+    const tokens = {
+      '{CATEGORY}': row.category || 'CATEGORY',
+      '{NAME}': (row.name || 'NAME').replace(/\s+/g, '_'),
+      '{REG}': row.registration_number || 'REG',
+      '{DATE}': row.date_of_issue || 'DATE',
+    };
+    let filename = state.outputNameTemplate;
+    Object.entries(tokens).forEach(([token, value]) => {
+      filename = filename.replace(new RegExp(token, 'g'), value);
+    });
+    return `${utils.sanitiseFilename(filename)}.pdf`;
+  };
+
+  const generateAll = async (merge = false) => {
+    if (!state.templateBytes) {
+      toast.show('Template missing', 'Load a template before generating.');
+      return;
+    }
+    if (!state.csvRows.length || state.csvErrors.some((issues) => issues.length)) {
+      toast.show('CSV not ready', 'Fix CSV errors before generating.');
+      return;
+    }
+    state.isGenerating = true;
+    state.generationCancelled = false;
+    updateProgress(0, 'Preparing documents…');
+    const batchSize = Number(document.getElementById('batch-size').value) || 50;
+    const merged = merge ? await PDFDocument.create() : null;
+    const files = [];
+    for (let i = 0; i < state.csvRows.length; i += batchSize) {
+      const batch = state.csvRows.slice(i, i + batchSize);
+      for (let j = 0; j < batch.length; j += 1) {
+        const row = batch[j];
+        const bytes = await renderModule.renderRow(row);
+        if (merge && merged) {
+          const doc = await PDFDocument.load(bytes);
+          const pages = await merged.copyPages(doc, doc.getPageIndices());
+          pages.forEach((page) => merged.addPage(page));
+        } else {
+          files.push({ name: nameForRow(row), bytes });
+        }
+        const completed = i + j + 1;
+        updateProgress(completed / state.csvRows.length, `Processed ${completed}/${state.csvRows.length}`);
+        await utils.requestIdle();
+      }
+      await utils.requestIdle();
+    }
+    if (merge && merged) {
+      const filename = document.getElementById('merged-filename').value || 'merged.pdf';
+      const mergedBytes = await merged.save();
+      saveAs(new Blob([mergedBytes], { type: 'application/pdf' }), filename);
+    } else if (files.length === 1) {
+      saveAs(new Blob([files[0].bytes], { type: 'application/pdf' }), files[0].name);
+    } else if (files.length > 1) {
+      const zip = new JSZip();
+      files.forEach((file) => zip.file(file.name, file.bytes));
+      const blob = await zip.generateAsync({ type: 'blob' });
+      saveAs(blob, 'certificates.zip');
+    }
+    updateProgress(1, 'Generation complete');
+    state.isGenerating = false;
+    toast.show('Generation complete', merge ? 'Merged PDF ready' : 'PDFs downloaded');
+  };
+
+  return { generateAll, updateProgress };
+})();
+
+const uiModule = (() => {
+  const bindInputs = () => {
+    document.getElementById('template-select').addEventListener('change', (event) => {
+      state.templateId = event.target.value;
+      previewModule.loadTemplate();
+      layoutModule.renderFields();
+    });
+    document.getElementById('csv-input').addEventListener('change', (event) => {
+      const file = event.target.files[0];
+      if (file) csvModule.process(file);
+    });
+    document.getElementById('primary-font').addEventListener('change', (event) => {
+      const file = event.target.files[0];
+      if (file) fontModule.registerFont('primary', file);
+    });
+    document.getElementById('bold-font').addEventListener('change', (event) => {
+      const file = event.target.files[0];
+      if (file) fontModule.registerFont('bold', file);
+    });
+    document.getElementById('custom-template').addEventListener('change', (event) => {
+      state.customTemplate = event.target.files[0];
+      previewModule.loadTemplate();
+    });
+    document.getElementById('qr-mode').addEventListener('change', (event) => {
+      state.qrMode = event.target.value;
+    });
+    document.getElementById('qr-image').addEventListener('change', (event) => {
+      state.qrImage = event.target.files[0];
+    });
+    document.getElementById('qr-ecc').addEventListener('change', (event) => {
+      state.qrOptions.ecc = event.target.value;
+    });
+    document.getElementById('qr-quiet').addEventListener('input', (event) => {
+      state.qrOptions.quiet = Number(event.target.value) || 0;
+    });
+    document.getElementById('filename-template').addEventListener('input', (event) => {
+      state.outputNameTemplate = event.target.value;
+    });
+    document.getElementById('force-raster-global').addEventListener('change', (event) => {
+      state.view.forceRaster = event.target.checked;
+    });
+    document.getElementById('unit-switcher').addEventListener('change', (event) => {
+      state.view.unit = event.target.value;
+      layoutModule.renderFieldList();
+    });
+    document.getElementById('zoom-slider').addEventListener('input', (event) => {
+      previewModule.setZoom(Number(event.target.value));
+    });
+    document.getElementById('zoom-in').addEventListener('click', () => {
+      const slider = document.getElementById('zoom-slider');
+      slider.value = Math.min(2, Number(slider.value) + 0.1).toFixed(2);
+      previewModule.setZoom(Number(slider.value));
+    });
+    document.getElementById('zoom-out').addEventListener('click', () => {
+      const slider = document.getElementById('zoom-slider');
+      slider.value = Math.max(0.25, Number(slider.value) - 0.1).toFixed(2);
+      previewModule.setZoom(Number(slider.value));
+    });
+    document.getElementById('pan-reset').addEventListener('click', () => previewModule.resetView());
+    document.getElementById('grid-visible').addEventListener('change', (event) => {
+      state.view.showGrid = event.target.checked;
+      if (state.templateBytes) previewModule.renderPDF(state.templateBytes);
+    });
+    document.getElementById('generate-all').addEventListener('click', () => generationModule.generateAll(false));
+    document.getElementById('merge-all').addEventListener('click', () => generationModule.generateAll(true));
+    document.getElementById('download-config').addEventListener('click', () => {
+      const json = configStore.exportAll(state.templateId, state.config);
+      const blob = new Blob([json], { type: 'application/json' });
+      saveAs(blob, `config-${state.templateId}.json`);
+    });
+    document.getElementById('config-import').addEventListener('change', async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        state.config = data.config;
+        layoutModule.renderFields();
+        previewModule.renderPDF(state.templateBytes);
+      } catch (error) {
+        toast.show('Import failed', 'Invalid configuration file.');
+      }
+    });
+    document.getElementById('reset-config').addEventListener('click', () => {
+      state.config = JSON.parse(JSON.stringify(configStore.baseConfig[state.templateId]));
+      layoutModule.renderFields();
+    });
+    document.getElementById('clear-diagnostics').addEventListener('click', () => diagnostics.clear());
+    document.getElementById('theme-toggle').addEventListener('change', (event) => {
+      document.body.classList.toggle('theme-light', event.target.checked);
+    });
+    fieldList.addEventListener('input', (event) => {
+      const target = event.target;
+      const field = target.dataset.field;
+      const key = target.dataset.key;
+      if (field && key) {
+        const value = target.type === 'checkbox' ? target.checked : target.value;
+        layoutModule.updateFieldValue(field, key, value);
+      }
+    });
+    fieldList.addEventListener('click', (event) => {
+      const duplicate = event.target.closest('[data-duplicate]');
+      if (duplicate) {
+        layoutModule.duplicateField(duplicate.dataset.duplicate);
+      }
+      const toggle = event.target.closest('input[data-toggle]');
+      if (toggle) {
+        layoutModule.toggleVisibility(toggle.dataset.toggle, toggle.checked);
+      }
+    });
+    overlay.addEventListener('click', (event) => {
+      const jump = event.target.dataset.jump;
+      if (jump) {
+        const spec = state.config.fields[jump];
+        if (spec) {
+          previewModule.panBy(-state.view.panX, -state.view.panY);
+          previewModule.setZoom(state.view.zoom);
+        }
+      }
+    });
+  };
+
+  const bindKeyboard = () => {
+    window.addEventListener('keydown', (event) => {
+      if (!state.selection) return;
+      const spec = state.config.fields[state.selection];
+      if (!spec) return;
+      const base = event.shiftKey ? 10 : 1;
+      const resize = event.ctrlKey || event.metaKey;
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
+        event.preventDefault();
+        const delta = base * (event.key.includes('Up') || event.key.includes('Right') ? 1 : -1);
+        if (resize) {
+          if (event.key.includes('Left') || event.key.includes('Right')) {
+            spec.w = Math.max(10, spec.w + delta);
+          } else {
+            spec.h = Math.max(10, spec.h + delta);
+          }
+        } else {
+          if (event.key.includes('Left') || event.key.includes('Right')) {
+            spec.x += delta;
+          } else {
+            spec.y += delta;
+          }
+        }
+        layoutModule.renderFields();
+      }
+    });
+  };
+
+  const init = async () => {
+    bindInputs();
+    bindKeyboard();
+    await previewModule.loadTemplate();
+    layoutModule.renderFields();
+    csvModule.renderTable();
+  };
+
+  return { init };
+})();
+
+        uiModule.init();
+      })();
+
+      /*
+       Test Plan (manual):
+       - Visual: Align known text and verify exported PDF alignment using overlay preview.
+       - Fit-to-box: Input long names in CSV to confirm shrink and ellipsis behaviours.
+       - Wrap: Use long addresses ensuring line wrapping with ellipsis on overflow.
+       - QR: Scan generated QR codes for default payload and ECC adjustments.
+       - CSV errors: Upload CSV missing critical columns to validate blocking errors.
+       - Batch: Generate 300-row sample verifying progress and responsiveness.
+       - Indic fallback: Provide Devanagari strings and confirm raster fallback accuracy.
+      */
+    </script>
   </body>
 </html>
