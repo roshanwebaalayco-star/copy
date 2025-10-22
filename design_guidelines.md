@@ -15,6 +15,43 @@
 
 ## Core Design Elements
 
+## Template Format Decision: PDF vs. DOCX
+
+When generating government certificates that must align exactly with pre-printed seals, signatures, or QR codes, use **PDF overlays** instead of Word templates. PDFs provide a fixed canvas, so every element lands on the precise coordinates defined during design.
+
+### Why PDFs Are Safer for Precision Work
+
+- **Locked layout** – PDF pages behave like static artboards. Text, QR codes, and other overlays render at their assigned `(x, y)` points with no risk of reflow.
+- **Cross-machine consistency** – A PDF looks identical regardless of OS, fonts installed, or viewer version.
+- **Printing fidelity** – “Actual size” printing preserves the source page box, ensuring 1:1 alignment with official stationery.
+
+### Where Word (DOCX) Falls Short
+
+Word documents recalculate layout on every machine. Font substitution, AutoFit, paragraph styles, or printer drivers can nudge lines by a few points—enough to misalign official marks. Use DOCX only for authoring, then export to PDF before any programmatic overlay.
+
+### Decision Matrix
+
+| Criterion | PDF overlay/fill | Word (DOCX) template |
+| --- | --- | --- |
+| Pixel-perfect placement | **Excellent** (absolute coordinates) | **Variable** (layout reflow) |
+| Cross-machine consistency | **High** | **Medium/Low** (font & version dependent) |
+| Indic script shaping | Good (with shaping fallback) | **Excellent** |
+| Editing the design | Hard (requires design tool) | Easy (in Word) |
+| Print fidelity | **High** | Medium (layout can shift after export) |
+| Dev complexity | Moderate (coordinate mapping) | Easy to start, hard to lock |
+
+### Hardening a DOCX Workflow (If Absolutely Necessary)
+
+If policy demands DOCX, apply all of the following safeguards to minimize drift:
+
+1. Anchor text boxes to the **page**, disable AutoFit, overlap, and hyphenation.
+2. **Embed fonts** in the document and standardize on one Word build for server-side export.
+3. Use **Exact** line spacing and disable compatibility tweaks that change metrics.
+4. Export to **PDF/A** with fonts embedded before running any overlays.
+5. Lock page size/margins to match stock and test on multiple machines/printers.
+
+Even with these controls, small reflows remain possible. For high-stakes certificates, stay PDF-native.
+
 ### A. Color Palette
 
 **Dark Mode (Primary)**:
